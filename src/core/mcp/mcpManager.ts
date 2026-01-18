@@ -23,6 +23,8 @@ import {
 
 export class McpManager {
   static readonly TOOL_NAME_DELIMITER = '__' // Delimiter for tool name construction (serverName__toolName)
+  private static initializeCallCount = 0
+  private static connectServerCallCount = 0
 
   public readonly disabled = !Platform.isDesktop // MCP should be disabled on mobile since it doesn't support node.js
 
@@ -36,6 +38,7 @@ export class McpManager {
   private subscribers = new Set<(servers: McpServerState[]) => void>()
 
   private availableToolsCache: McpTool[] | null = null
+  private instanceId = Math.random().toString(36).substring(7)
 
   constructor({
     settings,
@@ -58,29 +61,93 @@ export class McpManager {
   }
 
   public async initialize() {
+    McpManager.initializeCallCount++
+    const callNum = McpManager.initializeCallCount
+    const timestamp = new Date().toISOString()
+    const stack = new Error().stack
+
+    console.debug(
+      `[MCP-DEBUG] McpManager.initialize() CALLED #${callNum} at ${timestamp}`,
+      {
+        instanceId: this.instanceId,
+        disabled: this.disabled,
+        serversConfigCount: this.settings.mcp.servers.length,
+        currentServersCount: this.servers.length,
+        callStack: stack,
+      },
+    )
+
     if (this.disabled) {
+      console.debug(
+        `[MCP-DEBUG] McpManager.initialize() #${callNum} SKIPPED (disabled)`,
+      )
       return
     }
 
     // Get default environment variables
+    console.debug(
+      `[MCP-DEBUG] McpManager.initialize() #${callNum} Loading shell environment`,
+    )
     const { shellEnvSync } = await import('shell-env')
     this.defaultEnv = shellEnvSync()
+    console.debug(
+      `[MCP-DEBUG] McpManager.initialize() #${callNum} Shell environment loaded`,
+      {
+        envVarsCount: Object.keys(this.defaultEnv).length,
+      },
+    )
 
     // Create MCP servers
+    console.debug(
+      `[MCP-DEBUG] McpManager.initialize() #${callNum} Connecting to ${this.settings.mcp.servers.length} servers`,
+      {
+        serverNames: this.settings.mcp.servers.map((s) => s.id),
+      },
+    )
     const servers = await Promise.all(
       this.settings.mcp.servers.map((serverConfig) =>
         this.connectServer(serverConfig),
       ),
     )
+    console.debug(
+      `[MCP-DEBUG] McpManager.initialize() #${callNum} All servers connected, updating state`,
+      {
+        connectedCount: servers.filter(
+          (s) => s.status === McpServerStatus.Connected,
+        ).length,
+        errorCount: servers.filter((s) => s.status === McpServerStatus.Error)
+          .length,
+      },
+    )
     this.updateServers(servers)
+    console.debug(
+      `[MCP-DEBUG] McpManager.initialize() #${callNum} COMPLETED at ${new Date().toISOString()}`,
+    )
   }
 
   public cleanup() {
+    const timestamp = new Date().toISOString()
+    const stack = new Error().stack
+    const connectedServers = this.servers.filter(
+      (s) => s.status === McpServerStatus.Connected,
+    )
+
+    console.debug(`[MCP-DEBUG] McpManager.cleanup() CALLED at ${timestamp}`, {
+      instanceId: this.instanceId,
+      totalServers: this.servers.length,
+      connectedServers: connectedServers.length,
+      serverNames: connectedServers.map((s) => s.name),
+      callStack: stack,
+    })
+
     // Disconnect all clients
     void Promise.all(
-      this.servers
-        .filter((s) => s.status === McpServerStatus.Connected)
-        .map((s) => s.client.close()),
+      connectedServers.map((s) => {
+        console.debug(
+          `[MCP-DEBUG] McpManager.cleanup() Disconnecting server "${s.name}"`,
+        )
+        return s.client.close()
+      }),
     )
 
     if (this.unsubscribeFromSettings) {
@@ -90,6 +157,10 @@ export class McpManager {
     this.servers = []
     this.subscribers.clear()
     this.activeToolCalls.clear()
+
+    console.debug(
+      `[MCP-DEBUG] McpManager.cleanup() COMPLETED at ${new Date().toISOString()}`,
+    )
   }
 
   public getServers() {
@@ -184,13 +255,34 @@ export class McpManager {
   private async connectServer(
     serverConfig: McpServerConfig,
   ): Promise<McpServerState> {
+    McpManager.connectServerCallCount++
+    const callNum = McpManager.connectServerCallCount
+    const timestamp = new Date().toISOString()
+    const stack = new Error().stack
+
+    console.debug(
+      `[MCP-DEBUG] McpManager.connectServer() CALLED #${callNum} at ${timestamp}`,
+      {
+        instanceId: this.instanceId,
+        serverName: serverConfig.id,
+        enabled: serverConfig.enabled,
+        callStack: stack,
+      },
+    )
+
     if (this.disabled) {
+      console.debug(
+        `[MCP-DEBUG] McpManager.connectServer() #${callNum} ABORTED (MCP disabled)`,
+      )
       throw new McpNotAvailableException()
     }
 
     const { id: name, parameters: serverParams, enabled } = serverConfig
 
     if (!enabled) {
+      console.debug(
+        `[MCP-DEBUG] McpManager.connectServer() #${callNum} server "${name}" is DISABLED`,
+      )
       return {
         name,
         config: serverConfig,
@@ -217,8 +309,19 @@ export class McpManager {
     const { StdioClientTransport } = await import(
       '@modelcontextprotocol/sdk/client/stdio.js'
     )
+    console.debug(
+      `[MCP-DEBUG] McpManager.connectServer() #${McpManager.connectServerCallCount} Creating Client for "${name}"`,
+    )
     const client = new Client({ name, version: '1.0.0' })
 
+    console.debug(
+      `[MCP-DEBUG] McpManager.connectServer() #${McpManager.connectServerCallCount} ATTEMPTING client.connect() for "${name}"`,
+      {
+        command: serverParams.command,
+        args: serverParams.args,
+        timestamp: new Date().toISOString(),
+      },
+    )
     try {
       await client.connect(
         new StdioClientTransport({
@@ -229,7 +332,15 @@ export class McpManager {
           },
         }),
       )
+      console.debug(
+        `[MCP-DEBUG] McpManager.connectServer() #${McpManager.connectServerCallCount} client.connect() SUCCEEDED for "${name}"`,
+        { timestamp: new Date().toISOString() },
+      )
     } catch (error) {
+      console.debug(
+        `[MCP-DEBUG] McpManager.connectServer() #${McpManager.connectServerCallCount} client.connect() FAILED for "${name}"`,
+        { error, timestamp: new Date().toISOString() },
+      )
       console.error(
         `[Smart Composer] Failed to connect to MCP server "${name}":`,
         error,

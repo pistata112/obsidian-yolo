@@ -529,7 +529,28 @@ export default class SmartComposerPlugin extends Plugin {
   }
 
   async onload() {
+    const timestamp = new Date().toISOString()
+    const stack = new Error().stack
+
+    console.debug(
+      `[MCP-DEBUG] SmartComposerPlugin.onload() STARTED at ${timestamp}`,
+      {
+        manifestId: this.manifest.id,
+        manifestVersion: this.manifest.version,
+        callStack: stack,
+      },
+    )
+
     await this.loadSettings()
+    console.debug(
+      `[MCP-DEBUG] SmartComposerPlugin.onload() Settings loaded, MCP servers configured: ${this.settings.mcp.servers.length}`,
+      {
+        serverNames: this.settings.mcp.servers.map((s) => s.id),
+        enabledServers: this.settings.mcp.servers
+          .filter((s) => s.enabled)
+          .map((s) => s.id),
+      },
+    )
 
     this.registerView(CHAT_VIEW_TYPE, (leaf) => new ChatView(leaf, this))
     this.registerView(APPLY_VIEW_TYPE, (leaf) => new ApplyView(leaf, this))
@@ -789,6 +810,20 @@ export default class SmartComposerPlugin extends Plugin {
   }
 
   onunload() {
+    const timestamp = new Date().toISOString()
+    const stack = new Error().stack
+
+    console.debug(
+      `[MCP-DEBUG] SmartComposerPlugin.onunload() STARTED at ${timestamp}`,
+      {
+        manifestId: this.manifest.id,
+        hasMcpCoordinator: !!this.mcpCoordinator,
+        hasMcpManager: !!this.mcpManager,
+        hasDbManager: !!this.dbManager,
+        callStack: stack,
+      },
+    )
+
     this.closeSmartSpace()
 
     // Selection chat cleanup
@@ -805,6 +840,9 @@ export default class SmartComposerPlugin extends Plugin {
     this.timeoutIds = []
 
     // RagEngine cleanup
+    console.debug(
+      `[MCP-DEBUG] SmartComposerPlugin.onunload() Cleaning up RagCoordinator`,
+    )
     this.ragCoordinator?.cleanup()
     this.ragCoordinator = null
 
@@ -812,13 +850,26 @@ export default class SmartComposerPlugin extends Plugin {
     this.dbManagerInitPromise = null
 
     // DatabaseManager cleanup
+    console.debug(
+      `[MCP-DEBUG] SmartComposerPlugin.onunload() Cleaning up DatabaseManager`,
+    )
     if (this.dbManager) {
       void this.dbManager.cleanup()
     }
     this.dbManager = null
 
     // McpManager cleanup
+    console.debug(
+      `[MCP-DEBUG] SmartComposerPlugin.onunload() Cleaning up McpCoordinator`,
+      {
+        hasMcpCoordinator: !!this.mcpCoordinator,
+        timestamp: new Date().toISOString(),
+      },
+    )
     this.mcpCoordinator?.cleanup()
+    console.debug(
+      `[MCP-DEBUG] SmartComposerPlugin.onunload() McpCoordinator cleanup completed`,
+    )
     this.mcpCoordinator = null
     this.mcpManager = null
     this.ragAutoUpdateService?.cleanup()
@@ -828,6 +879,10 @@ export default class SmartComposerPlugin extends Plugin {
     this.clearTabCompletionTimer()
     this.cancelTabCompletionRequest()
     this.clearInlineSuggestion()
+
+    console.debug(
+      `[MCP-DEBUG] SmartComposerPlugin.onunload() COMPLETED at ${new Date().toISOString()}`,
+    )
   }
 
   async loadSettings() {
